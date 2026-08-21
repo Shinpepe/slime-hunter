@@ -1385,9 +1385,13 @@ const joy=document.getElementById('joy'), knob=document.getElementById('knob');
 const atkBtn=document.getElementById('atkBtn');
 if('ontouchstart' in window || navigator.maxTouchPoints>0){
   touchUI.classList.remove('hidden');
-  const setJoy=(e)=>{
-    e.preventDefault();
-    const t=e.touches[0];
+  /* 조이스틱은 자신을 처음 누른 손가락(identifier)만 추적한다.
+     e.touches[0]은 화면 전체 기준 첫 터치라서, 공격/대시 버튼을 먼저 누른 채
+     조이스틱을 잡으면 다른 손가락 좌표를 읽는 버그가 있었음.
+     (identifier는 0일 수 있으므로 null 비교로만 판별) */
+  let joyId=null;
+  const findTouch=(list,id)=>{ for(let i=0;i<list.length;i++) if(list[i].identifier===id) return list[i]; return null; };
+  const moveJoy=(t)=>{
     const r=joy.getBoundingClientRect();
     let dx=t.clientX-(r.left+r.width/2), dy=t.clientY-(r.top+r.height/2);
     const len=Math.hypot(dx,dy), max=32;
@@ -1395,10 +1399,25 @@ if('ontouchstart' in window || navigator.maxTouchPoints>0){
     joyVec={x:dx/max, y:dy/max};
     knob.style.transform='translate('+dx+'px,'+dy+'px)';
   };
-  const endJoy=(e)=>{ e.preventDefault(); joyVec={x:0,y:0}; knob.style.transform='translate(0,0)'; };
-  joy.addEventListener('touchstart',setJoy,{passive:false});
-  joy.addEventListener('touchmove',setJoy,{passive:false});
+  const resetJoy=()=>{ joyId=null; joyVec={x:0,y:0}; knob.style.transform='translate(0,0)'; };
+  joy.addEventListener('touchstart',e=>{
+    e.preventDefault();
+    if(joyId===null && e.changedTouches.length>0) joyId=e.changedTouches[0].identifier;
+    const t=findTouch(e.changedTouches, joyId);
+    if(t) moveJoy(t); // 추적 중이 아닌 두 번째 손가락은 무시
+  },{passive:false});
+  joy.addEventListener('touchmove',e=>{
+    e.preventDefault();
+    if(joyId===null) return;
+    const t=findTouch(e.changedTouches, joyId);
+    if(t) moveJoy(t);
+  },{passive:false});
+  const endJoy=(e)=>{
+    e.preventDefault();
+    if(joyId!==null && findTouch(e.changedTouches, joyId)) resetJoy();
+  };
   joy.addEventListener('touchend',endJoy,{passive:false});
+  joy.addEventListener('touchcancel',endJoy,{passive:false}); // OS가 터치를 끊어도 스틱이 고착되지 않게
   atkBtn.addEventListener('touchstart',e=>{ e.preventDefault(); initAudio(); touchAtk=true; },{passive:false});
   atkBtn.addEventListener('touchend',e=>{ e.preventDefault(); touchAtk=false; },{passive:false});
   const dashBtn=document.getElementById('dashBtn');
