@@ -175,7 +175,8 @@
   <div class="overlay" id="ovStart">
     <div class="panel">
       <h1>픽셀 슬라임 헌터</h1>
-      <p class="sub">들판을 점령한 슬라임을 물리치세요!</p>
+      <p class="sub" id="startSub">들판을 점령한 슬라임을 물리치세요!</p>
+      <p class="sub newLine hidden" id="startLast"></p>
       <p class="sub">최고 기록 <b id="startBest" style="color:#ffd23e">0</b></p>
       <div class="controls">
         <div><span class="kbd">←↑↓→</span> / <span class="kbd">WASD</span> 이동</div>
@@ -325,6 +326,12 @@ let state = 'start';
 let score=0, best=0, kills=0, wave=0;
 try{ best=(+localStorage.getItem('psh_best'))||0; }catch(e){}
 function saveBest(){ try{ localStorage.setItem('psh_best', best); }catch(e){} }
+function saveRunSnap(){
+  if(state!=='play' && state!=='pause' && state!=='stagewait') return;
+  try{ localStorage.setItem('psh_run', JSON.stringify({s:score, st:stageIdx, w:wave, g:ngPlus, k:kills})); }catch(e){}
+  saveShop();
+}
+function clearRunSnap(){ try{ localStorage.removeItem('psh_run'); }catch(e){} }
 let nextWaveT=-1, banner=null, shake=0, gameT=0, deathT=0;
 let mobs=[], parts=[], pops=[], spawnQueue=[], spawnT=0;
 let shots=[], ghosts=[], hitstop=0, wantDash=false;
@@ -767,7 +774,8 @@ window.addEventListener('keydown', e=>{
 window.addEventListener('keyup', e=>{ keys[keyName(e)]=false; });
 window.addEventListener('blur', ()=>{ for(const key in keys) keys[key]=false; joyVec={x:0,y:0}; touchAtk=false; wantDash=false; });
 
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden) setPause(true); });
+document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ setPause(true); saveRunSnap(); } });
+window.addEventListener('pagehide', saveRunSnap);
 
 const bg=document.createElement('canvas'); bg.width=W; bg.height=H;
 function buildTerrain(sIdx){
@@ -1413,7 +1421,7 @@ function hitMob(m){
   if(m.hitRecent>0) m.kbRes=Math.min(m.kbRes+1, 4);
   else m.kbRes=0;
   m.hitRecent=0.9;
-  const kb=115*(m.type.kbMul||1)/(1+m.kbRes*1.1);
+  const kb=115*(m.type.kbMul??1)/(1+m.kbRes*1.1);
   const a=Math.atan2(m.y-player.y, m.x-player.x);
   m.kbx+=Math.cos(a)*kb; m.kby+=Math.sin(a)*kb;
   comboKeep();
@@ -1447,7 +1455,7 @@ function killMob(m, mul, terrain){
   m.hp=0;
   let sc=Math.max(1, Math.round(m.type.score*(mul===undefined?1:mul)));
   if(state==='play'){
-    if(!terrain){
+    if(!terrain && m.type.kind!=='boss'){
       const t0=comboMult();
       combo++; comboT=COMBO_WINDOW; comboPop=0.15;
       const t1=comboMult();
@@ -1490,7 +1498,7 @@ function explode(x,y){
       g:0, life:0.25, max:0.25, col:'#fff3c8', s:2});
   }
 
-  if(state==='play' && !player.dead && player.inv<=0 &&
+  if(state==='play' && !player.dead && player.inv<=0 && player.dashT<=0 && player.dashGrace<=0 &&
      Math.hypot(player.x-x, (player.y-6)-y)<BOMB_R_PLAYER){
     hurtPlayer({x,y}, 1);
   }
@@ -1500,7 +1508,7 @@ function explode(x,y){
     if(Math.hypot(o.x-x, o.y-y)<BOMB_R_MOB){
       o.hp-=2; o.flash=0.15;
       const a=Math.atan2(o.y-y, o.x-x);
-      o.kbx+=Math.cos(a)*160*(o.type.kbMul||1); o.kby+=Math.sin(a)*160*(o.type.kbMul||1);
+      o.kbx+=Math.cos(a)*160*(o.type.kbMul??1); o.kby+=Math.sin(a)*160*(o.type.kbMul??1);
       if(o.hp<=0) killMob(o, 1, false);
     }
   }
@@ -1532,7 +1540,7 @@ function essenceBoom(x,y,src){
     if(Math.hypot(o.x-x, o.y-y)<BOMB_R_PLAYER){
       o.hp--; o.flash=0.12;
       const a=Math.atan2(o.y-y, o.x-x);
-      o.kbx+=Math.cos(a)*120*(o.type.kbMul||1); o.kby+=Math.sin(a)*120*(o.type.kbMul||1);
+      o.kbx+=Math.cos(a)*120*(o.type.kbMul??1); o.kby+=Math.sin(a)*120*(o.type.kbMul??1);
       comboKeep();
       if(o.hp<=0){ killMob(o, 1, false); gainEssenceFrom(o); }
     }
@@ -1555,7 +1563,7 @@ function cactusHitMob(m, o){
 }
 
 const BOSS_STAGE=4;
-const BOSS_TYPE={kind:'boss', body:'#3ecf5e', lite:'#9cf7a9', dark:'#27994a', hp:1, score:1500, spd:46, kbMul:0};
+const BOSS_TYPE={kind:'boss', body:'#3ecf5e', lite:'#9cf7a9', dark:'#27994a', hp:1, score:1500, spd:46, kbMul:1};
 function isBossStage(){ return stageIdx===BOSS_STAGE; }
 function bossPhase(m){ const f=m.hp/m.maxHp; return f>0.66?1 : f>0.33?2 : 3; }
 function bossShot(x,y,a,v){ shots.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,col:'#3ecf5e',lite:'#9cf7a9'}); }
@@ -2002,7 +2010,8 @@ function updShots(dt){
             s.dead=true;
             m.lastSwing=s.sid;
             m.hp--; m.flash=0.12; sHit(); hitstop=Math.max(hitstop,0.02);
-            m.kbx+=s.vx*0.45; m.kby+=s.vy*0.45;
+            const km=m.type.kbMul??1;
+            m.kbx+=s.vx*0.45*km; m.kby+=s.vy*0.45*km;
             comboKeep();
             burst(s.x, s.y, 5, ['#ffffff','#fff3c8'], 55, 0.25, 0);
             if(m.hp<=0){ killMob(m, 1, false); gainEssenceFrom(m); }
@@ -2103,6 +2112,7 @@ function stageClear(){
   if(!runStageHit) SAVE.rec.anyNoHit=1;
   if(isBossStage() && !runStageHit) SAVE.rec.fullNoHit=1;
   checkUnlocks();
+  saveRunSnap();
   const nuS=takeNewUnlocks();
   if(nuS.length){ stgNew.textContent='신규: '+nuS.join(' · '); stgNew.classList.remove('hidden'); }
   else stgNew.classList.add('hidden');
@@ -2127,7 +2137,8 @@ function advanceStage(){
   checkUnlocks();
   buildTerrain(stageIdx);
   player.x=W/2; player.y=H/2+18; player.dir='down';
-  player.kbx=0; player.kby=0; player.mvx=0; player.mvy=0;
+  player.kbx=0; player.kby=0; player.mvx=0; player.mvy=0; player.slowT=0;
+  combo=0; comboT=0; comboPop=0; essence=null; lastBoomSwing=-1;
   wave=0; nextWaveT=0.5; banner=null;
   ovStage.classList.add('hidden');
   state='play';
@@ -2214,6 +2225,7 @@ function startGame(){
   ovOver.classList.add('hidden');
   ovPause.classList.add('hidden');
   ovStage.classList.add('hidden');
+  startLast.classList.add('hidden'); startSub.classList.remove('hidden');
 }
 function settleRun(){
   best=Math.max(best,score);
@@ -2221,6 +2233,7 @@ function settleRun(){
   SAVE.wallet+=score;
   checkUnlocks();
   saveShop();
+  clearRunSnap();
 }
 function gameOver(){
   state='over';
@@ -2476,6 +2489,24 @@ const btnSound=document.getElementById('btnSound');
 const sndCv=document.getElementById('sndCv');
 const startBest=document.getElementById('startBest');
 startBest.textContent=best;
+const startLast=document.getElementById('startLast'), startSub=document.getElementById('startSub');
+(function mergeRunSnap(){
+  let d=null;
+  try{ const raw=localStorage.getItem('psh_run'); if(raw) d=JSON.parse(raw); }catch(e){}
+  clearRunSnap();
+  if(!d || typeof d!=='object') return;
+  const s=Math.max(0,Math.round((+d.s)||0));
+  if(s<=0) return;
+  SAVE.wallet+=s;
+  best=Math.max(best,s); saveBest();
+  if(s>=20000) SAVE.rec.hi20=1;
+  checkUnlocks(); saveShop();
+  startBest.textContent=best;
+  const nu=takeNewUnlocks();
+  const g=Math.max(0,(+d.g)|0), st=Math.max(0,(+d.st)|0), w=Math.max(1,(+d.w)|0);
+  startLast.textContent='지난 게임 정산 +'+s.toLocaleString()+' 골드 · '+(g>0?(g+1)+'회차 ':'')+(st+1)+'-'+w+' 도달'+(nu.length?' · 신규: '+nu.join(' · '):'');
+  startLast.classList.remove('hidden'); startSub.classList.add('hidden');
+})();
 document.getElementById('btnStart').addEventListener('click',startGame);
 document.getElementById('btnRetry').addEventListener('click',startGame);
 document.getElementById('btnResume').addEventListener('click',()=>setPause(false));
