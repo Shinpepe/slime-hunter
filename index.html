@@ -756,12 +756,13 @@ window.addEventListener('keydown', e=>{
   const key=keyName(e);
   if(['arrowleft','arrowright','arrowup','arrowdown',' '].includes(key)) e.preventDefault();
   keys[key]=true;
+  if(e.repeat) return;
   if(key==='m') toggleMute();
   if(shopOpen){
     if(key==='escape'||key==='enter') closeShop();
     return;
   }
-  if((key==='shift'||key==='x') && !e.repeat && state==='play') wantDash=true;
+  if((key==='shift'||key==='x') && state==='play') wantDash=true;
   if(state==='start' && (key==='enter'||key===' ')) startGame();
   else if(state==='over' && (key==='enter'||key==='r')) startGame();
   else if(state==='stagewait' && (key==='enter'||key===' ')) advanceStage();
@@ -2402,9 +2403,11 @@ function render(){
 }
 
 function fit(){
-  let sc=Math.min((innerWidth-20)/W, (innerHeight-20)/H);
-  if(sc>=2) sc=Math.floor(sc);
-  if(sc<=0) sc=1;
+  const dpr=window.devicePixelRatio||1;
+  // 물리 픽셀 기준 정수 배율: 게임 픽셀 1개가 항상 동일한 크기의 실제 픽셀 N개로 그려진다
+  let devSc=Math.floor(Math.min((innerWidth-20)*dpr/W, (innerHeight-20)*dpr/H));
+  if(devSc<1) devSc=1;
+  const sc=devSc/dpr;
   cv.style.width=(W*sc)+'px';
   cv.style.height=(H*sc)+'px';
   fitSoundBtn();
