@@ -195,7 +195,7 @@
         <div><span class="kbd">SHIFT</span> / <span class="kbd">X</span> 대시</div>
         <div><span class="kbd">P</span> 일시정지 &nbsp; <span class="kbd">M</span> 소리 켜기/끄기</div>
       </div>
-      <p class="sub touchHint">왼쪽 조이스틱으로 이동 · 오른쪽 버튼으로 공격 / 대시</p>
+      <p class="sub touchHint">왼쪽 조이스틱으로 이동, 오른쪽 버튼으로 공격과 대시</p>
       <div class="btnRow">
         <button class="btn" id="btnStart">게임 시작</button>
         <button class="btn btnAlt" id="btnShop">꾸미기</button>
@@ -620,9 +620,10 @@ function checkUnlocks(){
 function takeNewUnlocks(){ const t=newUnlocks; newUnlocks=[]; return t; }
 
 let actx=null;
+// [오디오] suspended뿐 아니라 iOS의 interrupted 상태도 복구. resume()의 Promise 거부는 무시
 function initAudio(){
   if(!actx){ try{ actx = new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
-  if(actx && actx.state==='suspended') actx.resume();
+  if(actx && actx.state!=='running'){ try{ actx.resume().catch(()=>{}); }catch(e){} }
 }
 function beep(freq, dur, type, vol, slideTo){
   if(muted || !actx) return;
@@ -726,7 +727,8 @@ function bgmHat(t,vol){
   s.start(t); s.stop(t+0.05);
 }
 function updBGM(){
-  if(!actx || muted || state==='start' || state==='over'){ bgm.next=0; return; }
+  // [오디오] 일시정지 중에는 BGM 스케줄링을 멈춘다. bgm.step은 유지되므로 재개 시 같은 마디에서 이어짐
+  if(!actx || muted || state==='start' || state==='over' || state==='pause'){ bgm.next=0; return; }
   if(!bgmGain){
     bgmGain=actx.createGain();
     bgmGain.gain.value = muted?0:1;
@@ -779,6 +781,7 @@ window.addEventListener('keydown', e=>{
   if(['arrowleft','arrowright','arrowup','arrowdown',' '].includes(key)) e.preventDefault();
   keys[key]=true;
   if(e.repeat) return;
+  initAudio();   // [오디오] 키 입력은 사용자 제스처이므로 정지된 컨텍스트를 여기서 복구
   if(key==='m') toggleMute();
   if(shopOpen){
     if(key==='escape'||key==='enter') closeShop();
@@ -803,7 +806,11 @@ document.addEventListener('click', e=>{
   if(b) b.blur();
 });
 
-document.addEventListener('visibilitychange', ()=>{ if(document.hidden){ setPause(true); saveRunSnap(); } });
+// [오디오] 탭 복귀 시 컨텍스트 재개를 시도한다(제스처 없이 거부되면 이후 입력에서 다시 복구됨)
+document.addEventListener('visibilitychange', ()=>{
+  if(document.hidden){ setPause(true); saveRunSnap(); }
+  else initAudio();
+});
 window.addEventListener('pagehide', saveRunSnap);
 
 const bg=document.createElement('canvas'); bg.width=W; bg.height=H;
@@ -2146,7 +2153,7 @@ function stageClear(){
   checkUnlocks();
   saveRunSnap();
   const nuS=takeNewUnlocks();
-  if(nuS.length){ stgNew.textContent='신규: '+nuS.join(' · '); stgNew.classList.remove('hidden'); }
+  if(nuS.length){ stgNew.textContent='신규 : '+nuS.join(', '); stgNew.classList.remove('hidden'); }
   else stgNew.classList.add('hidden');
   player.hp=player.maxHp;
   clearObstacles(true);
@@ -2161,6 +2168,7 @@ function stageClear(){
 }
 function advanceStage(){
   if(state!=='stagewait') return;
+  initAudio();   // [오디오] 스테이지 전환 시 정지된 컨텍스트 복구
   keys[' ']=false; keys['enter']=false;
   stageIdx++;
   if(stageIdx>=STAGES.length){ stageIdx=0; ngPlus++; }
@@ -2274,7 +2282,7 @@ function gameOver(){
   settleRun();
   stGold.textContent='+'+score.toLocaleString()+' (지갑 '+SAVE.wallet.toLocaleString()+')';
   const nuO=takeNewUnlocks();
-  if(nuO.length){ stNew.textContent='신규: '+nuO.join(' · '); stNew.classList.remove('hidden'); }
+  if(nuO.length){ stNew.textContent='신규 : '+nuO.join(', '); stNew.classList.remove('hidden'); }
   else stNew.classList.add('hidden');
   stScore.textContent=score;
   stBest.textContent=best;
@@ -2308,13 +2316,13 @@ function goTitle(){
   ovStart.classList.remove('hidden');
   const bits=[];
   if(got>0) bits.push('정산 +'+got.toLocaleString()+' 골드');
-  if(nu.length) bits.push('신규: '+nu.join(' · '));
-  if(bits.length) showTitleNote(bits.join(' · '));
+  if(nu.length) bits.push('신규 : '+nu.join(', '));
+  if(bits.length) showTitleNote(bits.join(' / '));
   fitSoundBtn();
 }
 function setPause(on){
   if(on && state==='play'){ state='pause'; ovPause.classList.remove('hidden'); }
-  else if(!on && state==='pause'){ state='play'; ovPause.classList.add('hidden'); }
+  else if(!on && state==='pause'){ initAudio(); state='play'; ovPause.classList.add('hidden'); }   // [오디오] 재개 시 컨텍스트 복구
 }
 function toggleMute(){
   muted=!muted;
@@ -2486,7 +2494,7 @@ window.addEventListener('orientationchange', ()=>setTimeout(fit,250));
 
 const HUD_BTNS=[
   {x0:198, x1:229, act:()=>setPause(true)},
-  {x0:231, x1:260, act:()=>{ toggleMute(); if(!muted) sTick(); }},
+  {x0:231, x1:260, act:()=>{ initAudio(); toggleMute(); if(!muted) sTick(); }},   // [오디오] 컨텍스트가 없으면 sTick이 무음이던 문제
 ];
 function canvasPos(e){
   const r=cv.getBoundingClientRect();
@@ -2579,7 +2587,8 @@ function syncTouchUI(){
   if(!show){ resetJoy(); touchAtk=false; }
 }
 // 실제로 터치가 들어오면 터치 모드로 전환(pointer:coarse 판정이 빗나간 기기 대비)
-window.addEventListener('touchstart', ()=>setTouchMode(true), {passive:true, capture:true});
+// [오디오] 터치도 사용자 제스처이므로 여기서 컨텍스트를 복구한다
+window.addEventListener('touchstart', ()=>{ setTouchMode(true); initAudio(); }, {passive:true, capture:true});
 
 joy.addEventListener('touchstart',e=>{
   e.preventDefault();
@@ -2644,10 +2653,10 @@ const startLast=document.getElementById('startLast'), startSub=document.getEleme
   const bits=[];
   if(s>0){
     const g=Math.max(0,(+d.g)|0), st=Math.max(0,(+d.st)|0), w=Math.max(1,(+d.w)|0);
-    bits.push('지난 게임 정산 +'+s.toLocaleString()+' 골드 · '+(g>0?(g+1)+'회차 ':'')+(st+1)+'-'+w+' 도달');
+    bits.push('지난 게임 정산 +'+s.toLocaleString()+' 골드 ('+(g>0?(g+1)+'회차 ':'')+(st+1)+'-'+w+' 도달)');
   }
-  if(nu.length) bits.push('신규: '+nu.join(' · '));
-  if(bits.length) showTitleNote(bits.join(' · '));
+  if(nu.length) bits.push('신규 : '+nu.join(', '));
+  if(bits.length) showTitleNote(bits.join(' / '));
 })();
 document.getElementById('btnStart').addEventListener('click',startGame);
 document.getElementById('btnRetry').addEventListener('click',startGame);
@@ -2809,7 +2818,7 @@ function renderShopInfo(){
   else if(st==='owned'){ shopAct.textContent='착용하기'; }
   else if(st==='buy'){
     if(SAVE.wallet>=it.price) shopAct.textContent=it.price.toLocaleString()+' 구매';
-    else { shopAct.textContent='골드 부족 · '+it.price.toLocaleString(); shopAct.classList.add('off'); }
+    else { shopAct.textContent='골드 부족 ('+it.price.toLocaleString()+' 필요)'; shopAct.classList.add('off'); }
   }
   else if(st==='locked'){ shopAct.textContent='조건 달성 후 구매 가능'; shopAct.classList.add('off'); }
   else if(st==='achieve'){ shopAct.textContent='업적 달성 시 획득'; shopAct.classList.add('off'); }
